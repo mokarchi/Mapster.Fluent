@@ -15,6 +15,7 @@ namespace Mapster.Fluent
         /// </summary>
         public static IServiceCollection AddMapster(this IServiceCollection serviceCollection)
         {
+            if (serviceCollection == null) throw new ArgumentNullException(nameof(serviceCollection));
             serviceCollection.TryAddTransient<IMapper, Mapper>();
             return serviceCollection;
         }
@@ -33,29 +34,78 @@ namespace Mapster.Fluent
             if (configureOptions == null) throw new ArgumentNullException(nameof(configureOptions));
 
             var options = new MapsterOptions();
-            configureOptions?.Invoke(options);
+            configureOptions.Invoke(options);
 
-            var config = new TypeAdapterConfig();
+            // Create and wrap TypeAdapterConfig
+            var innerConfig = new TypeAdapterConfig();
+            IFluentMapperConfig config = new FluentTypeAdapterConfig(innerConfig);
             options.ConfigureAction?.Invoke(config);
 
             // Assembly scanning
             if (options.AssembliesToScan?.Any() == true)
             {
-                config.Scan(options.AssembliesToScan.ToArray());
+                innerConfig.Scan(options.AssembliesToScan.ToArray());
             }
 
             // Register the configuration
-            serviceCollection.TryAddSingleton(config);
+            serviceCollection.TryAddSingleton(config.GetInnerConfig());
 
-            // Register the appropriate mapper
+            // Register mapper based on UseServiceMapper option
             if (options.UseServiceMapper)
             {
                 serviceCollection.TryAddTransient<IMapper, ServiceMapper>();
+                serviceCollection.TryAddSingleton<IMapContextFactory, DefaultMapContextFactory>();
             }
             else
             {
-                serviceCollection.TryAddTransient<IMapper>(sp => new Mapper(config));
+                serviceCollection.TryAddTransient<IMapper, Mapper>();
             }
+
+            return serviceCollection;
+        }
+
+        /// <summary>
+        /// Adds Mapster with fluent configuration using IFluentMapperConfig, enabling chainable mapping rules and DI support with ServiceMapper.
+        /// </summary>
+        /// <param name="serviceCollection">The service collection to add Mapster services to.</param>
+        /// <param name="configure">Action to configure fluent mapping rules using IFluentMapperConfig.</param>
+        /// <returns>The service collection for method chaining.</returns>
+        public static IServiceCollection AddMapsterFluent(
+            this IServiceCollection serviceCollection,
+            Action<IFluentMapperConfig> configure)
+        {
+            if (serviceCollection == null) throw new ArgumentNullException(nameof(serviceCollection));
+            if (configure == null) throw new ArgumentNullException(nameof(configure));
+
+            var innerConfig = new TypeAdapterConfig();
+            IFluentMapperConfig config = new FluentTypeAdapterConfig(innerConfig);
+            configure.Invoke(config);
+
+            serviceCollection.TryAddSingleton(config.GetInnerConfig());
+            serviceCollection.TryAddTransient<IMapper, ServiceMapper>();
+            serviceCollection.TryAddSingleton<IMapContextFactory, DefaultMapContextFactory>();
+
+            return serviceCollection;
+        }
+
+        /// <summary>
+        /// Adds Mapster using an existing TypeAdapterConfig, enabling DI support with ServiceMapper and IMapContextFactory.
+        /// </summary>
+        /// <param name="serviceCollection">The service collection to add Mapster services to.</param>
+        /// <param name="existingConfig">The pre-configured TypeAdapterConfig to use for mapping.</param>
+        /// <returns>The service collection for method chaining.</returns>
+        public static IServiceCollection AddMapsterWithConfig(
+            this IServiceCollection serviceCollection,
+            TypeAdapterConfig existingConfig)
+        {
+            if (serviceCollection == null) throw new ArgumentNullException(nameof(serviceCollection));
+            if (existingConfig == null) throw new ArgumentNullException(nameof(existingConfig));
+
+            IFluentMapperConfig config = new FluentTypeAdapterConfig(existingConfig);
+
+            serviceCollection.TryAddSingleton(config.GetInnerConfig());
+            serviceCollection.TryAddTransient<IMapper, ServiceMapper>();
+            serviceCollection.TryAddSingleton<IMapContextFactory, DefaultMapContextFactory>();
 
             return serviceCollection;
         }

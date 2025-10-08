@@ -28,7 +28,6 @@ namespace Mapster.Fluent.Tests
 
             // Assert
             mapper.ShouldNotBeNull();
-            // Note: Without config parameter, it uses default Mapper, not ServiceMapper
             mapper.ShouldBeOfType<Mapper>();
         }
 
@@ -45,8 +44,9 @@ namespace Mapster.Fluent.Tests
             {
                 options.ConfigureAction = config =>
                 {
-                    config.ForType<TestUser, TestUserDto>()
-                        .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}");
+                    config.NewConfig<TestUser, TestUserDto>()
+                        .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}")
+                        .Ignore(dest => dest.Id);
                 };
             });
 
@@ -58,6 +58,40 @@ namespace Mapster.Fluent.Tests
             var user = new TestUser { FirstName = "John", LastName = "Doe" };
             var dto = mapper.Map<TestUserDto>(user);
             dto.FullName.ShouldBe("John Doe");
+            dto.Id.ShouldBe(0);
+        }
+
+        [TestMethod]
+        public void AddMapster_WithFluentChaining_AppliesMultipleConfigurations()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+
+            // Act
+            services.AddMapster(options =>
+            {
+                options.ConfigureAction = config =>
+                {
+                    config.NewConfig<TestUser, TestUserDto>()
+                        .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}")
+                        .Ignore(dest => dest.Id);
+                    config.NewConfig<TestProduct, TestProductDto>()
+                        .Map(dest => dest.DisplayName, src => src.Name.ToUpper());
+                };
+            });
+
+            var provider = services.BuildServiceProvider();
+            var mapper = provider.GetRequiredService<IMapper>();
+
+            // Assert
+            var user = new TestUser { FirstName = "Jane", LastName = "Smith", Id = 1 };
+            var userDto = mapper.Map<TestUserDto>(user);
+            userDto.FullName.ShouldBe("Jane Smith");
+            userDto.Id.ShouldBe(0);
+
+            var product = new TestProduct { Name = "widget" };
+            var productDto = mapper.Map<TestProductDto>(product);
+            productDto.DisplayName.ShouldBe("WIDGET");
         }
 
         [TestMethod]
@@ -128,6 +162,7 @@ namespace Mapster.Fluent.Tests
 
             // Assert
             mapper.ShouldNotBeNull();
+            mapper.ShouldBeOfType<ServiceMapper>();
         }
 
         // ===== ASSEMBLY SCANNING TESTS =====
@@ -149,7 +184,6 @@ namespace Mapster.Fluent.Tests
             mapper.ShouldNotBeNull();
             config.ShouldNotBeNull();
 
-            // Test that our IRegister implementation was discovered
             var user = new TestUser { FirstName = "Scanned", LastName = "User" };
             var dto = mapper.Map<TestUserDto>(user);
             dto.FullName.ShouldBe("Scanned User");
@@ -432,8 +466,11 @@ namespace Mapster.Fluent.Tests
                 // 1. Fluent Configuration
                 options.ConfigureAction = config =>
                 {
-                    config.ForType<TestProduct, TestProductDto>()
-                        .Map(dest => dest.DisplayName, src => $"[{src.Name}]");
+                    config.NewConfig<TestProduct, TestProductDto>()
+                        .Map(dest => dest.DisplayName, src => $"Product: {src.Name}");
+                    config.NewConfig<TestUser, TestUserDto>()
+                        .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}")
+                        .Ignore(dest => dest.Id);
                 };
 
                 // 2. Assembly Scanning
@@ -457,7 +494,7 @@ namespace Mapster.Fluent.Tests
             // Test fluent configuration
             var product = new TestProduct { Name = "Widget" };
             var productDto = mapper.Map<TestProductDto>(product);
-            productDto.DisplayName.ShouldBe("[Widget]");
+            productDto.DisplayName.ShouldBe("Product: Widget");
 
             // Test ServiceMapper type
             mapper.ShouldBeOfType<ServiceMapper>();
@@ -478,6 +515,283 @@ namespace Mapster.Fluent.Tests
             // Assert
             mapper.ShouldBeOfType<ServiceMapper>();
         }
+
+        // ===== ADD MAPSTER WITH CONFIG TESTS =====
+
+        [TestMethod]
+        public void AddMapsterWithConfig_WithValidConfig_RegistersMapperAndConfig()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            var existingConfig = new TypeAdapterConfig();
+            existingConfig.NewConfig<TestUser, TestUserDto>()
+                .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}")
+                .Ignore(dest => dest.Id);
+
+            // Act
+            services.AddMapsterWithConfig(existingConfig);
+            var provider = services.BuildServiceProvider();
+            var mapper = provider.GetRequiredService<IMapper>();
+            var config = provider.GetRequiredService<TypeAdapterConfig>();
+
+            // Assert
+            mapper.ShouldNotBeNull();
+            mapper.ShouldBeOfType<ServiceMapper>();
+            config.ShouldBeSameAs(existingConfig);
+            var user = new TestUser { FirstName = "John", LastName = "Doe", Id = 1 };
+            var dto = mapper.Map<TestUserDto>(user);
+            dto.FullName.ShouldBe("John Doe");
+            dto.Id.ShouldBe(0);
+        }
+
+        [TestMethod]
+        public void AddMapsterWithConfig_WithNullServices_ThrowsArgumentNullException()
+        {
+            // Arrange
+            IServiceCollection services = null;
+            var existingConfig = new TypeAdapterConfig();
+
+            // Act & Assert
+            Should.Throw<ArgumentNullException>(() => services.AddMapsterWithConfig(existingConfig));
+        }
+
+        [TestMethod]
+        public void AddMapsterWithConfig_WithNullConfig_ThrowsArgumentNullException()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+
+            // Act & Assert
+            Should.Throw<ArgumentNullException>(() => services.AddMapsterWithConfig(null));
+        }
+
+        [TestMethod]
+        public void AddMapsterWithConfig_RegistersTypeAdapterConfigAsSingleton()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            var existingConfig = new TypeAdapterConfig();
+            services.AddMapsterWithConfig(existingConfig);
+            var provider = services.BuildServiceProvider();
+
+            // Act
+            TypeAdapterConfig config1, config2;
+            using (var scope1 = provider.CreateScope())
+            {
+                config1 = scope1.ServiceProvider.GetRequiredService<TypeAdapterConfig>();
+            }
+            using (var scope2 = provider.CreateScope())
+            {
+                config2 = scope2.ServiceProvider.GetRequiredService<TypeAdapterConfig>();
+            }
+
+            // Assert
+            config1.ShouldBeSameAs(config2);
+            config1.ShouldBeSameAs(existingConfig);
+        }
+
+        [TestMethod]
+        public void AddMapsterWithConfig_RegistersServiceMapperAsScoped()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            var existingConfig = new TypeAdapterConfig();
+            services.AddMapsterWithConfig(existingConfig);
+            var provider = services.BuildServiceProvider();
+
+            // Act
+            IMapper mapper1, mapper2;
+            using (var scope1 = provider.CreateScope())
+            {
+                mapper1 = scope1.ServiceProvider.GetRequiredService<IMapper>();
+            }
+            using (var scope2 = provider.CreateScope())
+            {
+                mapper2 = scope2.ServiceProvider.GetRequiredService<IMapper>();
+            }
+
+            // Assert
+            mapper1.ShouldNotBeSameAs(mapper2);
+            mapper1.ShouldBeOfType<ServiceMapper>();
+            mapper2.ShouldBeOfType<ServiceMapper>();
+        }
+
+        [TestMethod]
+        public void AddMapsterWithConfig_RegistersMapContextFactory()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            var existingConfig = new TypeAdapterConfig();
+
+            // Act
+            services.AddMapsterWithConfig(existingConfig);
+            var provider = services.BuildServiceProvider();
+            var factory = provider.GetRequiredService<IMapContextFactory>();
+
+            // Assert
+            factory.ShouldNotBeNull();
+            factory.ShouldBeOfType<DefaultMapContextFactory>();
+        }
+
+        // ===== ADD MAPSTER FLUENT TESTS =====
+
+        [TestMethod]
+        public void AddMapsterFluent_WithFluentConfiguration_RegistersMapper()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+
+            // Act
+            services.AddMapsterFluent(config =>
+            {
+                config.NewConfig<TestUser, TestUserDto>()
+                    .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}")
+                    .Ignore(dest => dest.Id);
+            });
+
+            var provider = services.BuildServiceProvider();
+            var mapper = provider.GetRequiredService<IMapper>();
+
+            // Assert
+            mapper.ShouldNotBeNull();
+            mapper.ShouldBeOfType<ServiceMapper>();
+            var user = new TestUser { FirstName = "John", LastName = "Doe", Id = 1 };
+            var dto = mapper.Map<TestUserDto>(user);
+            dto.FullName.ShouldBe("John Doe");
+            dto.Id.ShouldBe(0); // Ignored
+        }
+
+        [TestMethod]
+        public void AddMapsterFluent_WithMultipleConfigurations_AppliesAll()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+
+            // Act
+            services.AddMapsterFluent(config =>
+            {
+                config.NewConfig<TestUser, TestUserDto>()
+                    .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}")
+                    .Ignore(dest => dest.Id);
+                config.NewConfig<TestProduct, TestProductDto>()
+                    .Map(dest => dest.DisplayName, src => src.Name.ToUpper());
+            });
+
+            var provider = services.BuildServiceProvider();
+            var mapper = provider.GetRequiredService<IMapper>();
+
+            // Assert
+            var user = new TestUser { FirstName = "Jane", LastName = "Smith", Id = 1 };
+            var userDto = mapper.Map<TestUserDto>(user);
+            userDto.FullName.ShouldBe("Jane Smith");
+            userDto.Id.ShouldBe(0);
+
+            var product = new TestProduct { Name = "widget" };
+            var productDto = mapper.Map<TestProductDto>(product);
+            productDto.DisplayName.ShouldBe("WIDGET");
+        }
+
+        [TestMethod]
+        public void AddMapsterFluent_WithNullServices_ThrowsArgumentNullException()
+        {
+            // Arrange
+            IServiceCollection services = null;
+
+            // Act & Assert
+            Should.Throw<ArgumentNullException>(() =>
+                services.AddMapsterFluent(config => { }));
+        }
+
+        [TestMethod]
+        public void AddMapsterFluent_WithNullConfigure_ThrowsArgumentNullException()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+
+            // Act & Assert
+            Should.Throw<ArgumentNullException>(() =>
+                services.AddMapsterFluent(null));
+        }
+
+        [TestMethod]
+        public void AddMapsterFluent_RegistersTypeAdapterConfigAsSingleton()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            services.AddMapsterFluent(config => { });
+            var provider = services.BuildServiceProvider();
+
+            // Act
+            TypeAdapterConfig config1, config2;
+            using (var scope1 = provider.CreateScope())
+            {
+                config1 = scope1.ServiceProvider.GetRequiredService<TypeAdapterConfig>();
+            }
+            using (var scope2 = provider.CreateScope())
+            {
+                config2 = scope2.ServiceProvider.GetRequiredService<TypeAdapterConfig>();
+            }
+
+            // Assert
+            config1.ShouldBeSameAs(config2);
+        }
+
+        [TestMethod]
+        public void AddMapsterFluent_RegistersServiceMapperAsScoped()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            services.AddMapsterFluent(config => { });
+            var provider = services.BuildServiceProvider();
+
+            // Act
+            IMapper mapper1, mapper2;
+            using (var scope1 = provider.CreateScope())
+            {
+                mapper1 = scope1.ServiceProvider.GetRequiredService<IMapper>();
+            }
+            using (var scope2 = provider.CreateScope())
+            {
+                mapper2 = scope2.ServiceProvider.GetRequiredService<IMapper>();
+            }
+
+            // Assert
+            mapper1.ShouldNotBeSameAs(mapper2);
+            mapper1.ShouldBeOfType<ServiceMapper>();
+            mapper2.ShouldBeOfType<ServiceMapper>();
+        }
+
+        [TestMethod]
+        public void AddMapsterFluent_RegistersMapContextFactory()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            services.AddMapsterFluent(config => { });
+
+            // Act
+            var provider = services.BuildServiceProvider();
+            var factory = provider.GetRequiredService<IMapContextFactory>();
+
+            // Assert
+            factory.ShouldNotBeNull();
+            factory.ShouldBeOfType<DefaultMapContextFactory>();
+        }
+
+        [TestMethod]
+        public void AddMapsterFluent_WithEmptyConfiguration_StillRegistersMapper()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+
+            // Act
+            services.AddMapsterFluent(config => { });
+            var provider = services.BuildServiceProvider();
+            var mapper = provider.GetRequiredService<IMapper>();
+
+            // Assert
+            mapper.ShouldNotBeNull();
+            mapper.ShouldBeOfType<ServiceMapper>();
+        }
     }
 
     // ===== TEST MODELS =====
@@ -486,11 +800,13 @@ namespace Mapster.Fluent.Tests
     {
         public string FirstName { get; set; }
         public string LastName { get; set; }
+        public int Id { get; set; }
     }
 
     public class TestUserDto
     {
         public string FullName { get; set; }
+        public int Id { get; set; }
     }
 
     public class TestProduct
@@ -509,7 +825,7 @@ namespace Mapster.Fluent.Tests
     {
         public void Register(TypeAdapterConfig config)
         {
-            config.ForType<TestUser, TestUserDto>()
+            config.NewConfig<TestUser, TestUserDto>()
                 .Map(dest => dest.FullName, src => $"{src.FirstName} {src.LastName}");
         }
     }

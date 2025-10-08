@@ -20,9 +20,6 @@ namespace Mapster.Fluent
         /// </summary>
         public bool UseServiceMapper { get; set; } = true;
 
-        /// <summary>
-        /// Gets or sets the configuration action to apply to TypeAdapterConfig.
-        /// </summary>
-        public Action<TypeAdapterConfig> ConfigureAction { get; set; }
+        public Action<IFluentMapperConfig> ConfigureAction { get; set; }
     }
 }
