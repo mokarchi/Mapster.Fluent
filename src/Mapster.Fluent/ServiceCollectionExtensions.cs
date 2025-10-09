@@ -10,48 +10,36 @@ namespace Mapster.Fluent
     public static class ServiceCollectionExtensions
     {
         /// <summary>
-        /// Adds Mapster with default configuration (uses regular Mapper, no DI support).
-        /// Preserved for backward compatibility.
+        /// Adds Mapster with fluent configuration using IFluentMapperConfig, enabling chainable mapping rules, assembly scanning, and DI support with ServiceMapper.
         /// </summary>
-        public static IServiceCollection AddMapster(this IServiceCollection serviceCollection)
-        {
-            if (serviceCollection == null) throw new ArgumentNullException(nameof(serviceCollection));
-            serviceCollection.TryAddTransient<IMapper, Mapper>();
-            return serviceCollection;
-        }
-
-        /// <summary>
-        /// Adds Mapster with fluent configuration options.
-        /// </summary>
-        /// <param name="serviceCollection">The service collection.</param>
-        /// <param name="configureOptions">Action to configure MapsterOptions.</param>
-        /// <returns>The service collection for chaining.</returns>
-        public static IServiceCollection AddMapster(
+        /// <param name="serviceCollection">The service collection to add Mapster services to.</param>
+        /// <param name="configure">Action to configure fluent mapping rules using IFluentMapperConfig.</param>
+        /// <param name="options">Optional action to configure Mapster options, including assembly scanning and mapper selection.</param>
+        /// <returns>The service collection for method chaining.</returns>
+        public static IServiceCollection AddMapsterFluent(
             this IServiceCollection serviceCollection,
-            Action<MapsterOptions> configureOptions)
+            Action<IFluentMapperConfig> configure,
+            Action<MapsterOptions> options = null)
         {
             if (serviceCollection == null) throw new ArgumentNullException(nameof(serviceCollection));
-            if (configureOptions == null) throw new ArgumentNullException(nameof(configureOptions));
+            if (configure == null) throw new ArgumentNullException(nameof(configure));
 
-            var options = new MapsterOptions();
-            configureOptions.Invoke(options);
+            var mapsterOptions = new MapsterOptions();
+            options?.Invoke(mapsterOptions);
 
-            // Create and wrap TypeAdapterConfig
             var innerConfig = new TypeAdapterConfig();
             IFluentMapperConfig config = new FluentTypeAdapterConfig(innerConfig);
-            options.ConfigureAction?.Invoke(config);
+            configure.Invoke(config);
+            mapsterOptions.ConfigureAction?.Invoke(config);
 
             // Assembly scanning
-            if (options.AssembliesToScan?.Any() == true)
+            if (mapsterOptions.AssembliesToScan?.Any() == true)
             {
-                innerConfig.Scan(options.AssembliesToScan.ToArray());
+                innerConfig.Scan(mapsterOptions.AssembliesToScan.ToArray());
             }
 
-            // Register the configuration
             serviceCollection.TryAddSingleton(config.GetInnerConfig());
-
-            // Register mapper based on UseServiceMapper option
-            if (options.UseServiceMapper)
+            if (mapsterOptions.UseServiceMapper)
             {
                 serviceCollection.TryAddTransient<IMapper, ServiceMapper>();
                 serviceCollection.TryAddSingleton<IMapContextFactory, DefaultMapContextFactory>();
@@ -60,30 +48,6 @@ namespace Mapster.Fluent
             {
                 serviceCollection.TryAddTransient<IMapper, Mapper>();
             }
-
-            return serviceCollection;
-        }
-
-        /// <summary>
-        /// Adds Mapster with fluent configuration using IFluentMapperConfig, enabling chainable mapping rules and DI support with ServiceMapper.
-        /// </summary>
-        /// <param name="serviceCollection">The service collection to add Mapster services to.</param>
-        /// <param name="configure">Action to configure fluent mapping rules using IFluentMapperConfig.</param>
-        /// <returns>The service collection for method chaining.</returns>
-        public static IServiceCollection AddMapsterFluent(
-            this IServiceCollection serviceCollection,
-            Action<IFluentMapperConfig> configure)
-        {
-            if (serviceCollection == null) throw new ArgumentNullException(nameof(serviceCollection));
-            if (configure == null) throw new ArgumentNullException(nameof(configure));
-
-            var innerConfig = new TypeAdapterConfig();
-            IFluentMapperConfig config = new FluentTypeAdapterConfig(innerConfig);
-            configure.Invoke(config);
-
-            serviceCollection.TryAddSingleton(config.GetInnerConfig());
-            serviceCollection.TryAddTransient<IMapper, ServiceMapper>();
-            serviceCollection.TryAddSingleton<IMapContextFactory, DefaultMapContextFactory>();
 
             return serviceCollection;
         }
@@ -124,11 +88,13 @@ namespace Mapster.Fluent
             if (assemblies == null || assemblies.Length == 0)
                 throw new ArgumentException("At least one assembly must be provided", nameof(assemblies));
 
-            return serviceCollection.AddMapster(options =>
-            {
-                options.AssembliesToScan = assemblies;
-                options.UseServiceMapper = true;
-            });
+            return serviceCollection.AddMapsterFluent(
+                config => { }, // No additional fluent config
+                options =>
+                {
+                    options.AssembliesToScan = assemblies;
+                    options.UseServiceMapper = true;
+                });
         }
     }
 }
